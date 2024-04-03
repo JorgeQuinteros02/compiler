@@ -1,1 +1,4 @@
-1-+;;;;;
+var x = 5;
+x = x + 3;
+asdflkjhqwtioz
+3215498541asdfasdga

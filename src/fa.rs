@@ -1,5 +1,27 @@
 use std::collections::{HashMap, VecDeque};
+/*
+A Deterministic Finite Automaton is a simple machine model that will recognize regular languages
+A DFA consists of a 5-tuple (States, Alphabet, Initial, Transition, Accepting)
+where   States is a set of states of the DFA
+        Alphabet is a set of input symbols
+        Initial is a state in States
+        Transition is a function that takes a state and an input symbol and gives a new state
+        Accepting is a set of states from States
 
+You can give a DFA a string, and it will accept or reject it.
+The set of all strings accepted by the DFA is its Language.
+We can specify a language by making a DFA for it.
+
+This struct implements a DFA by modeling it by the transition matrix associated to a transition graph.
+This matrix has one row per state and one column per input symbol.
+The (i,j) entry is a state x that the ith state transitions to
+after the DFA reads the jth symbol.
+
+When a DFA reads a string, it starts at the Initial state goes through the transition matrix
+by reading each subsequent symbol in the string and the current state.
+If the DFA ends in an accepting state after reading the whole string, we say that
+the DFA accepts the given string. Otherwise, we reject the string.
+ */
 #[derive(Default)]
 pub struct Dfa {
     accept: Vec<bool>,
@@ -47,18 +69,24 @@ impl Dfa {
         self.accept[state as usize]
     }
 
+    /*
+    This method is used to split the input string into tokens in an unamboguous way.
+    Read the comment above the lexical_scan function for more information.
+    */
     pub fn get_longest_accepted(&self, istream: &mut VecDeque<u8>) -> Vec<u8> {
         let mut state = 0;
         let mut last_accepting_index: Option<usize> = Option::None;
 
         for (index, i) in istream.iter().enumerate() {
             if !self.symbol_indices.contains_key(&(*i as char)) {
-                println!("unrecognized symbol '{}' at {}", *i as char, index);
+                // Stop reading once you find a symbol that isn't recognized by this DFA
                 break
             }
+
+            // transition to the next state
             state = self.transition[state][self.symbol_indices[&(*i as char)]];
+            
             if self.accept[state] {
-                println!("recognized accepting symbol '{}' at {}", *i as char, index);
                 last_accepting_index = Some(index);
             }
         }
@@ -67,10 +95,9 @@ impl Dfa {
             Some(t) => {
                 let mut out: Vec<u8> = vec![];
                 for i in 0..=t {
-                    print!("{}", istream[i] as char);
                     out.push(istream[i])
                 };
-                print!("\n");
+                //print!("\n");
                 out
                 
             }

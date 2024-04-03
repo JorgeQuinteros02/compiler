@@ -17,6 +17,6 @@ fn main() {
 
     let input = VecDeque::from(input);
 
-    println!("{:?}", lexical_scan(input));
+    println!("{:#?}", lexical_scan(input));
 
 }
