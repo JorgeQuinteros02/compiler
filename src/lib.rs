@@ -1,8 +1,9 @@
 use std::{collections::{HashMap, VecDeque}, fmt::Error, rc::Rc};
 
-use fa::Dfa;
+use dfa::Dfa;
 
-mod fa;
+pub mod dfa;
+pub mod nfa;
 
 /* Generate a DFA that accepts keywords. Currently this includes only the keyword "var" */
 pub fn make_keyword_dfa() -> Dfa {
@@ -141,11 +142,11 @@ pub fn lexical_scan(mut istream: VecDeque<u8>) -> Result<HashMap<String, Rc<Stri
 
     // Set up DFA's and associate them with a class name
     let machines: [(Rc<String>, Dfa); 5] = [
-        (Rc::new("ignored".to_string()), make_ignored_dfa()),
+        (Rc::new("ignored".to_string()), Dfa::from_regex("(;| |\t|\r|\n)","; \t\r\n")),
         (Rc::new("identifier".to_string()), make_identifier_dfa()),
-        (Rc::new("keyword".to_string()), make_keyword_dfa()),
-        (Rc::new("operator".to_string()), make_operator_dfa()),
-        (Rc::new("integer".to_string()), make_integer_dfa()),
+        (Rc::new("keyword".to_string()), Dfa::from_regex("(var|print|if)", "varpintf")),
+        (Rc::new("operator".to_string()), Dfa::from_regex("(\\+|-|/|\\*|=)", "+-/*=")),
+        (Rc::new("integer".to_string()), Dfa::from_regex("(0|1|2|3|4|5|6|7|8|9)*", "0123456789")),
     ];
 
     while !istream.is_empty() {

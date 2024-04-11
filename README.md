@@ -8,7 +8,16 @@ The output if this program is a syntax tree, which can be traversed to give the 
 
 Code generation is out of the scope of this paper.
 
-The interface of this software is a simple CLI which takes a .txt file path as an argument and prints the operations in order. For example, a user would write "compiler.exe my_input.txt" to the command line and the program could print 
-"ASSIGN(5,X) ADD(X, 3) PRINT(X)".
+The interface of this software is a simple CLI which takes a .txt file path as an argument and prints the operations in order. For example, a user would write 
+
+```console
+    compiler.exe my_input.txt
+```
+
+to the command line and the program could print
+
+```console
+ASSIGN(5,X) ADD(X, 3) PRINT(X)
+```
 
 
