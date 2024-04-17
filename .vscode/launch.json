@@ -1,0 +1,12 @@
+{
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Launch",
+            "program": "${workspaceFolder}/target/debug/compiler.exe",
+            "args": ["test1.txt"],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}

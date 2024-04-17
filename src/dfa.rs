@@ -1,4 +1,5 @@
-use std::collections::{HashMap, VecDeque};
+use std::{collections::{HashMap, VecDeque}, hash::Hash, thread::current};
+use itertools::{enumerate, GroupingMapBy, Itertools};
 
 use crate::nfa::Nfa;
 /*
@@ -26,8 +27,8 @@ the DFA accepts the given string. Otherwise, we reject the string.
 */
 #[derive(Default, Debug)]
 pub struct Dfa {
-    accept: Vec<bool>,
-    transition: Vec<Vec<usize>>,
+    pub accept: Vec<bool>,
+    pub transition: Vec<Vec<usize>>,
     symbol_indices: HashMap<char, usize>,
 }
 
@@ -114,8 +115,21 @@ impl Dfa {
 
 
 
-        Dfa{transition, symbol_indices:nfa.symbols_table.clone(), accept}
+        let dfa = Dfa{transition, symbol_indices:nfa.symbols_table.clone(), accept};
+        dfa.minimized()
     }
+
+
+
+    pub fn minimized(&self) -> Self {
+        let mut cloud = DfaCloud::from_dfa(self);
+        cloud.divide();
+        let (transition, accept) = cloud.into_dfa_graph();
+
+
+        Self { accept, transition, symbol_indices: self.symbol_indices.clone()}
+    }
+        
 
     
     pub fn accepts(&self, word: String) -> bool {
@@ -158,7 +172,6 @@ impl Dfa {
                 for i in 0..=t {
                     out.push(istream[i])
                 };
-                //print!("\n");
                 out
                 
             }
@@ -166,4 +179,99 @@ impl Dfa {
     }
 
 }
+
+struct DfaCloud {
+    state_transition:Vec<Vec<usize>>,
+    groups:Vec<Vec<usize>>,
+    state_groups: Vec<usize>,
+    accept: Vec<bool>,
+}
+
+impl DfaCloud {
+    fn from_dfa(dfa:&Dfa) -> Self {
+        let groups: Vec<Vec<usize>> = dfa.accept.iter().enumerate().map(|(x,y)| (y,x)).into_group_map().into_values().collect_vec();
+        let mut state_groups = vec![0; dfa.accept.len()];
+        if groups.len() == 2 {
+            for &state_index in groups[1].iter() {
+                state_groups[state_index] = 1;
+            }
+        }
+
+        Self { state_transition: dfa.transition.clone(), groups, state_groups, accept:dfa.accept.clone()}
+    }
+
+    #[inline]
+    fn get_group_transitions(&self, group_index: usize, translate:Option<&Vec<usize>>) -> Vec<usize> {
+
+        self.state_transition[self.groups[group_index][0]].iter().map(|x| {
+            if let Some(map) = translate {
+                map[self.state_groups[*x]]
+            } else {
+                self.state_groups[*x]
+            }
+            
+        }).collect_vec()
+    }
+
+    fn into_dfa_graph(&self) -> (Vec<Vec<usize>>, Vec<bool>) {
+        let group0_index = self.state_groups[0];
+        let mut translated: Vec<usize> = (0..self.state_groups.len()).collect();
+        translated.swap(0, group0_index);
+        let state0_transition = self.get_group_transitions(group0_index, Some(&translated));
+        let mut transition = vec![state0_transition];
+        let mut accept = vec![false; self.groups.len()];
+
+
+        for i in 0..self.groups.len() {
+            if self.accept[self.groups[i][0]] {
+                accept[translated[i]] = true;
+            }
+            
+            if i != group0_index {
+                transition.push(self.get_group_transitions(i, Some(&translated)))
+            }
+        }
+
+        (transition, accept)
+    }
+
+    fn divide(&mut self) {
+        let mut current_group_index = 0;
+        while current_group_index < self.groups.len() {
+            let current_group = &self.groups[current_group_index];
+
+            let subgroups: HashMap<&Vec<usize>, Vec<usize>> = current_group.into_iter().map(|&x|{
+                (&self.state_transition[x], x)
+            }).into_group_map();
+
+            let subgroup_num = subgroups.len();
+
+            if subgroup_num == 0 {
+                panic!()
+            } else if subgroup_num == 1 {
+                current_group_index += 1;
+                continue
+            }
+
+            self.groups.remove(current_group_index);
+
+            for group in self.groups[current_group_index..].into_iter() {
+                group.into_iter().for_each(|x| self.state_groups[*x] -= 1)
+            } 
+
+            for subgroup in subgroups.values() {
+                let new_index = self.groups.len();
+                subgroup.iter().for_each(|&x| self.state_groups[x] = new_index);
+                self.groups.push(subgroup.clone());
+            }
+
+            current_group_index = 0;
+        }
+
+
+
+    }
+}
+
+
 

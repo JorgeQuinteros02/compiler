@@ -5,13 +5,20 @@ use compiler::{dfa::Dfa, lexical_scan, nfa::Nfa};
 
 
 fn main() {
-    test_lexical_scanner()
+    
+    let args:Vec<String> = args().collect();
+    let args: Vec<&str> = args.iter().map(|x| x.as_str()).collect();
+
+    match args[1] {
+        "lex" => test_lexical_scanner(args[2]),
+        "dfa" => test_dfa_from_regex(args[2], args[3]),
+        _ => println!("Incorrect argument. write 'lex <filename>' or 'dfa \"<regex>\" \"<alphabet>\"'")
+    }
 }
 
-fn test_lexical_scanner() {
-    let args:Vec<String> = args().collect();
+fn test_lexical_scanner(arg:&str) {
 
-    let mut file = match File::open(args[1].clone()) {
+    let mut file = match File::open(arg.clone()) {
         Ok(t) => t,
         Err(t) => panic!("{:?}", t)
     };
@@ -24,13 +31,16 @@ fn test_lexical_scanner() {
     println!("{:#?}", lexical_scan(input));
 }
 
-fn test_dfa_from_regex() {
-    let args: Vec<String> = args().collect();
-    let regex = args[1].as_str();
-    let alphabet = args[2].as_str();
+fn test_dfa_from_regex(arg1:&str, arg2:&str) {
+    let regex = arg1;
+    let alphabet = arg2;
+    println!("Making NFA from regex {:#?} with alphabet {:#?}", regex, alphabet);
     let nfa = Nfa::from_regex(regex, alphabet);
+    nfa.transition.iter().for_each(|x| println!("{x:?}"));
+    println!("Making DFA from NFA");
+    
     let dfa = Dfa::from_nfa(&nfa);
-    println!("Making DFA from regex {:#?} with alphabet {:#?}", regex, alphabet);
+    dfa.transition.iter().enumerate().for_each(|(i, x)| println!("{x:?} {}", dfa.accept[i]));
 
     
     println!("Enter a word to run through the DFA or enter QUIT to exit");

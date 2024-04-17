@@ -22,7 +22,6 @@ impl Nfa {
     pub fn from_regex(regex: &str, alphabet: &str) -> Nfa {
         let alphabet: Vec<char> = alphabet.chars().collect();
         let fragment = NfaFragment::from_regex(regex, &alphabet);
-        //println!("{regex}{fragment:#?}");
 
         let mut transition = fragment.transition;
 
@@ -47,7 +46,6 @@ impl Nfa {
         let mut accepting = vec![false; num_states];
         *accepting.last_mut().unwrap() = true;
 
-        //println!("Made NFA");
         Self::new(transition, accepting, alphabet)
     }
 
@@ -203,9 +201,7 @@ const OPERATORS: &'static str = ")(|+*"; // in order of lower to higher preceden
                 match token {
                     '*' => {
                         let fragment = eval_stack.pop().unwrap();
-                        //println!("frag before star {fragment:#?}");
                         eval_stack.push(Self::star(fragment));
-                        //println!("frag* {:#?}",eval_stack.last());
                     }, 
                     '+' => {
                         let frag2 = eval_stack.pop().unwrap(); 

@@ -152,7 +152,6 @@ pub fn lexical_scan(mut istream: VecDeque<u8>) -> Result<HashMap<String, Rc<Stri
     while !istream.is_empty() {
         // get the longest prefix that is accepted by any DFA
         let longest_accepted = machines.iter().map(|(class, machine)| {
-            //println!("running {class} dfa ");
             (machine.get_longest_accepted(&mut istream), class)
         }).max_by_key(|(name, _class)| {
             // sort each longest prefix by length
@@ -167,7 +166,6 @@ pub fn lexical_scan(mut istream: VecDeque<u8>) -> Result<HashMap<String, Rc<Stri
         // Skip ignored tokens
         if !(class.contains("ignored") || symbol_table.contains_key(&name)){
             symbol_table.insert(name.clone(), class.clone());
-            //println!("{:?}", symbol_table)
         }
 
         // Pop front of the string
