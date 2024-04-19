@@ -1,4 +1,4 @@
-use std::{collections::{HashMap, VecDeque}, hash::Hash, thread::current};
+use std::{collections::{HashMap, VecDeque}, hash::Hash, path::Display, thread::current};
 use itertools::{enumerate, GroupingMapBy, Itertools};
 
 use crate::nfa::Nfa;
@@ -27,18 +27,18 @@ the DFA accepts the given string. Otherwise, we reject the string.
 */
 #[derive(Default, Debug)]
 pub struct Dfa {
-    pub accept: Vec<bool>,
+    pub marks: Vec<usize>,
     pub transition: Vec<Vec<usize>>,
     symbol_indices: HashMap<char, usize>,
 }
 
 impl Dfa {
-    pub fn new(states: Vec<(char, bool)>, alphabet: Vec<char>, transitions: Vec<Vec<(char, char)>>) -> Self {
+    pub fn new(states: Vec<(char, usize)>, alphabet: Vec<char>, transitions: Vec<Vec<(char, char)>>) -> Self {
         // Assume initial state is in index 0 and transition table is using states' order for rows
-        let mut accept = vec![false; states.len()];
+        let mut marks = vec![0; states.len()];
         let mut state_indices:HashMap<char, usize> = HashMap::new();
-        for (i,(state, accepting)) in states.iter().enumerate() {
-            accept[i] = *accepting;
+        for (i,(state, mark)) in states.iter().enumerate() {
+            marks[i] = *mark;
             state_indices.insert(*state, i);
         }
 
@@ -57,12 +57,12 @@ impl Dfa {
         }       
         
         Dfa{
-            accept, transition, symbol_indices
+            marks, transition, symbol_indices
         }
     }
 
-    pub fn from_regex(regex:&str, alphabet:&str) -> Self {
-        Self::from_nfa(&Nfa::from_regex(regex, alphabet))
+    pub fn from_regex(regex:&str, alphabet:&str, mark_num:usize) -> Self {
+        Self::from_nfa(&Nfa::from_regex(regex, alphabet, mark_num))
     }
 
     pub fn from_nfa(nfa: &Nfa) -> Self {
@@ -79,7 +79,7 @@ impl Dfa {
         // This represents the epsilon-closure of 
         let start_state = nfa.empty_closure(vec![0]).unwrap_or(vec![]);
         subset_table.insert(start_state.clone(), 0);
-        let mut accept= vec![start_state.clone().iter().any(|x| nfa.accepting[*x])];
+        let mut marks= vec![start_state.clone().iter().map(|x| nfa.marks[*x]).max().unwrap_or_default()];
 
         let mut stack: Vec<Vec<usize>> = vec![start_state];
 
@@ -105,7 +105,7 @@ impl Dfa {
                     state_count += 1;
                     transition.push(vec![0; alphabet_size]);
                     stack.push(candidate.clone());
-                    accept.push(candidate.iter().any(|&x| nfa.accepting[x]));
+                    marks.push(candidate.iter().map(|&x| nfa.marks[x]).max().unwrap_or_default());
                     subset_table.insert(candidate, state_count);
                     transition[dfa_index][symbol] = state_count;
                 }
@@ -115,8 +115,9 @@ impl Dfa {
 
 
 
-        let dfa = Dfa{transition, symbol_indices:nfa.symbols_table.clone(), accept};
-        dfa.minimized()
+        let dfa = Dfa{transition, symbol_indices:nfa.symbols_table.clone(), marks};
+        let minimized = dfa.minimized();
+        minimized
     }
 
 
@@ -124,10 +125,10 @@ impl Dfa {
     pub fn minimized(&self) -> Self {
         let mut cloud = DfaCloud::from_dfa(self);
         cloud.divide();
-        let (transition, accept) = cloud.into_dfa_graph();
+        let (transition, marks) = cloud.into_dfa_graph();
 
 
-        Self { accept, transition, symbol_indices: self.symbol_indices.clone()}
+        Self { marks, transition, symbol_indices: self.symbol_indices.clone()}
     }
         
 
@@ -140,42 +141,36 @@ impl Dfa {
             state = self.transition[state][self.symbol_indices[&i]];
         }
 
-        self.accept[state as usize]
+        self.marks[state] > 0
     }
 
     /*
     This method is used to split the input string into tokens in an unamboguous way.
     Read the comment above the lexical_scan function for more information.
     */
-    pub fn get_longest_accepted(&self, istream: &mut VecDeque<u8>) -> Vec<u8> {
-        let mut state = 0;
-        let mut last_accepting_index: Option<usize> = Option::None;
+    pub fn get_longest_accepted(&self, istream: &mut VecDeque<u8>) -> (String, usize) {
+        let mut current_state = 0;
+        let mut last_mark = 0;
+        let mut longest_accepted: Vec<u8> = vec![];
+        let mut token_buffer: Vec<u8> = vec![];
+        
 
-
-        for (index, i) in istream.iter().enumerate() {
-            if !self.symbol_indices.contains_key(&(*i as char)) {
-                // Stop reading once you find a symbol that isn't recognized by this DFA
+        while !istream.is_empty() {
+            let next_token = istream.pop_front().unwrap();
+            current_state = self.transition[current_state][self.symbol_indices[&(next_token as char)]];
+            token_buffer.push(next_token);
+            if self.marks[current_state] > 0 {
+                longest_accepted.extend(token_buffer.iter());
+                last_mark = self.marks[current_state];
+                token_buffer.clear();
+            } else {
+                token_buffer.into_iter().rev().for_each(|x| istream.push_front(x));
                 break
             }
+        }
 
-            // transition to the next state
-            state = self.transition[state][self.symbol_indices[&(*i as char)]];
-            
-            if self.accept[state] {
-                last_accepting_index = Some(index);
-            }
-        }
-        match last_accepting_index {
-            None => vec![],
-            Some(t) => {
-                let mut out: Vec<u8> = vec![];
-                for i in 0..=t {
-                    out.push(istream[i])
-                };
-                out
-                
-            }
-        }
+        (longest_accepted.into_iter().map(|x| x as char).collect::<String>(), last_mark)
+
     }
 
 }
@@ -184,20 +179,31 @@ struct DfaCloud {
     state_transition:Vec<Vec<usize>>,
     groups:Vec<Vec<usize>>,
     state_groups: Vec<usize>,
-    accept: Vec<bool>,
+    marks: Vec<usize>,
 }
 
 impl DfaCloud {
     fn from_dfa(dfa:&Dfa) -> Self {
-        let groups: Vec<Vec<usize>> = dfa.accept.iter().enumerate().map(|(x,y)| (y,x)).into_group_map().into_values().collect_vec();
-        let mut state_groups = vec![0; dfa.accept.len()];
-        if groups.len() == 2 {
-            for &state_index in groups[1].iter() {
-                state_groups[state_index] = 1;
+        let groups: Vec<Vec<usize>> = dfa.marks
+                                                .iter()
+                                                .enumerate()
+                                                .map(|(i,mark)| (*mark, i))
+                                                .into_group_map()
+                                                .into_values()
+                                                .sorted_by_key(|x| x[0])
+                                                .collect_vec();
+
+        let mut state_groups = vec![0; dfa.marks.len()];
+        if groups.len() > 1 {
+            for (group_index, group) in groups.iter().enumerate() {
+                for &state_index in group {
+                    state_groups[state_index] = group_index;
+                }
             }
+            
         }
 
-        Self { state_transition: dfa.transition.clone(), groups, state_groups, accept:dfa.accept.clone()}
+        Self { state_transition: dfa.transition.clone(), groups, state_groups, marks:dfa.marks.clone()}
     }
 
     #[inline]
@@ -213,36 +219,36 @@ impl DfaCloud {
         }).collect_vec()
     }
 
-    fn into_dfa_graph(&self) -> (Vec<Vec<usize>>, Vec<bool>) {
+    fn into_dfa_graph(&self) -> (Vec<Vec<usize>>, Vec<usize>) {
         let group0_index = self.state_groups[0];
         let mut translated: Vec<usize> = (0..self.state_groups.len()).collect();
         translated.swap(0, group0_index);
         let state0_transition = self.get_group_transitions(group0_index, Some(&translated));
         let mut transition = vec![state0_transition];
-        let mut accept = vec![false; self.groups.len()];
+        let mut marks = vec![0; self.groups.len()];
 
 
         for i in 0..self.groups.len() {
-            if self.accept[self.groups[i][0]] {
-                accept[translated[i]] = true;
-            }
+            marks[translated[i]] = self.groups[i].clone().into_iter().map(|x| self.marks[x]).max().unwrap_or_default();
             
             if i != group0_index {
                 transition.push(self.get_group_transitions(i, Some(&translated)))
             }
         }
 
-        (transition, accept)
+        (transition, marks)
     }
 
     fn divide(&mut self) {
         let mut current_group_index = 0;
         while current_group_index < self.groups.len() {
             let current_group = &self.groups[current_group_index];
-
-            let subgroups: HashMap<&Vec<usize>, Vec<usize>> = current_group.into_iter().map(|&x|{
-                (&self.state_transition[x], x)
-            }).into_group_map();
+            let subgroups: Vec<Vec<usize>> = current_group.into_iter()
+                                                            .map(|&x|{(&self.state_transition[x], x)})
+                                                            .into_group_map()
+                                                            .into_values()
+                                                            .sorted_by_key(|x| x[0])
+                                                            .collect_vec();
 
             let subgroup_num = subgroups.len();
 
@@ -256,22 +262,35 @@ impl DfaCloud {
             self.groups.remove(current_group_index);
 
             for group in self.groups[current_group_index..].into_iter() {
-                group.into_iter().for_each(|x| self.state_groups[*x] -= 1)
-            } 
-
-            for subgroup in subgroups.values() {
-                let new_index = self.groups.len();
-                subgroup.iter().for_each(|&x| self.state_groups[x] = new_index);
-                self.groups.push(subgroup.clone());
+                group.into_iter().for_each(|x| self.state_groups[*x] += subgroup_num-1);
             }
+
+            for (i, subgroup) in subgroups.iter().enumerate() {
+                let new_index = current_group_index + i;
+                subgroup.iter().for_each(|&x| self.state_groups[x] = new_index);
+            }
+            let ( first_half,  second_half) = self.groups.split_at(current_group_index);
+
+            let mut new_group:Vec<Vec<usize>> = vec![];
+            first_half.iter().for_each(|x| {new_group.push(x.clone())});
+            subgroups.iter().for_each(|x| {new_group.push(x.clone())});
+            second_half.iter().for_each(|x| {new_group.push(x.clone())});
+            
+            self.groups = new_group;
 
             current_group_index = 0;
         }
-
-
-
     }
 }
 
-
-
+impl ToString for Dfa {
+    fn to_string(&self) -> String {
+        let mut string = String::new();
+        let sorted_alphabet = self.symbol_indices.keys().sorted_by_key(|x| self.symbol_indices[x]).collect_vec();
+        string.push_str(format!("{:?}\n",sorted_alphabet).as_str());
+        for i in 0..self.marks.len() {
+            string.push_str(format!("{i} {:?} {:?}\n", self.transition[i], self.marks[i]).as_str())
+        }
+        string
+    }
+}

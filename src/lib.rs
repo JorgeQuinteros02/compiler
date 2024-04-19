@@ -1,118 +1,16 @@
 use std::{collections::{HashMap, VecDeque}, fmt::Error, rc::Rc};
-
 use dfa::Dfa;
+use itertools::Itertools;
+use nfa::Nfa;
+
+
 
 pub mod dfa;
 pub mod nfa;
 
-/* Generate a DFA that accepts keywords. Currently this includes only the keyword "var" */
-pub fn make_keyword_dfa() -> Dfa {
-    let states = vec![('0', false), ('v', false), ('a', false), ('r', true),('E', false)];
-    let alphabet: Vec<char> = "var".to_string().chars().collect();
-    
-    // Each state will go to the next state if they read the symbol that represents that state . 0 -> v -> a -> r
-    let transitions = states.iter().enumerate().map(|(i,(_, _))|{
-        alphabet.iter().map(|&symbol|{
-            if i <=2 && states[i+1].0 == symbol {
-                (symbol, symbol)
-            } else {
-                // Any symbol other than the next symbol in the word automatically makes us reject the string.
-                (symbol, 'E')
-            }
-        }).collect()
-    }).collect();
-
-    Dfa::new(states, alphabet, transitions)
-}
 
 const DIGITS: &str = "0123456789";
-/* Generate a DFA that accepts integer constants. This will accept any string of digits (including any zeros on the left).*/
-pub fn make_integer_dfa() -> Dfa {
-    // State 1 represents having read a positive amount of integers and only having read integers
-    let states = vec![('0', false), ('1', true)];
-    
-    // By our definition of DFA, something that isn't in the alphabet will be rejected.
-    // This implies that all unicode scalars are implicitly in the actual alphabet of this DFA
-    let alphabet: Vec<char>= DIGITS.to_string().chars().collect();
-    let transitions = states.iter().map(|(_state, _)|{
-        alphabet.iter().map(|&symbol|{
-            // reading a digit will take to state 1
-            // reading a non-digit will reject
-            (symbol, '1')
-        }).collect()
-    }).collect();
-
-    Dfa::new(states, alphabet, transitions)
-}
-
 const LETTERS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
-/* Generate a DFA that accepts identifiers. These are given by the regex 
-                L(L|D)*
-where L is the set of all letters (and the underscore) and D is the set of all Digits.
-This means that the string accepts any string that begins with a letter or underscore and is 
-followed by any combination of letters, digits and underscores.
-*/
-pub fn make_identifier_dfa() -> Dfa {
-    // State L represents that the first character was a letter or underscore
-    // State D represents that the first character was a digit
-    let states = vec![('0', false), ('L', true), ('D', false)];
-    
-    let mut alphabet = LETTERS.to_string();
-    alphabet.push_str(DIGITS);
-    let alphabet: Vec<char> = alphabet.chars().collect();
-
-    let transitions = states.iter().map(|(state, _)| {
-        alphabet.iter().map(|&symbol| {
-            if *state == '0' {
-                if LETTERS.contains(symbol) {
-                    (symbol, 'L')
-                } else {
-                    (symbol, 'D')
-                }
-            } else {
-                // We loop in states L or D as long as we have valid characters
-                (symbol, *state)
-            }
-        }).collect()
-    }).collect();
-
-    Dfa::new(states, alphabet, transitions)
-}
-
-/* Generate DFA to recognize operators. This currently recognizes the arithmetic operators + - / *  
-and the assignment operator =. The DFA recognizes a single character at a time */
-pub fn make_operator_dfa() -> Dfa {
-    let states = vec![('0',false), ('1', true), ('E', false)];
-    let alphabet: Vec<char> = "+-*/=".to_string().chars().collect();
-    let transitions = states.iter().map(|(state, _)|{
-        alphabet.iter().map(|&symbol|{
-            if *state == '0' {
-                (symbol, '1')
-            } else {
-                (symbol, 'E')
-            }
-        }).collect()
-    }).collect();
-
-    Dfa::new(states, alphabet, transitions)
-}
-
-/* Generate a DFA to recognize ignored tokens, like whitespace and semicolons. */
-pub fn make_ignored_dfa() -> Dfa {
-    let states = vec![('0',false), ('1', true), ('E', false)];
-    let alphabet: Vec<char> = " ;\n\r\t\0".to_string().chars().collect();
-    let transitions = states.iter().map(|(state, _)|{
-        alphabet.iter().map(|&symbol|{
-            if *state == '0' {
-                (symbol, '1')
-            } else {
-                (symbol, 'E')
-            }
-        }).collect()
-    }).collect();
-
-    Dfa::new(states, alphabet, transitions)
-}
 
 /* 
     Perform a lexical scan on given input file.
@@ -136,51 +34,42 @@ pub fn make_ignored_dfa() -> Dfa {
     This method takes the longest string from the start accepted by any DFA as the correct next token.
     Then, it removes that token and starts where it ends.
 
-*/
-pub fn lexical_scan(mut istream: VecDeque<u8>) -> Result<HashMap<String, Rc<String>>, Error> {
-    let mut symbol_table = HashMap::<Vec<u8>,Rc<String>>::new();
+    */
+pub fn lexical_scan(mut istream: VecDeque<u8>) -> Result<HashMap<String, String>, Error> {
+    let mut symbol_table = HashMap::<String,String>::new();
 
     // Set up DFA's and associate them with a class name
-    let machines: [(Rc<String>, Dfa); 5] = [
-        (Rc::new("ignored".to_string()), Dfa::from_regex("(;| |\t|\r|\n)","; \t\r\n")),
-        (Rc::new("identifier".to_string()), make_identifier_dfa()),
-        (Rc::new("keyword".to_string()), Dfa::from_regex("(var|print|if)", "varpintf")),
-        (Rc::new("operator".to_string()), Dfa::from_regex("(\\+|-|/|\\*|=)", "+-/*=")),
-        (Rc::new("integer".to_string()), Dfa::from_regex("(0|1|2|3|4|5|6|7|8|9)*", "0123456789")),
+    let letter_regex: String = LETTERS.chars().collect_vec().into_iter().interleave(vec!['|';LETTERS.len() - 1]).collect::<String>();
+    let digit_regex: String = DIGITS.chars().collect_vec().into_iter().interleave(vec!['|';DIGITS.len() - 1]).collect::<String>();
+
+    let identifier_regex = ["(",letter_regex.as_str(),")(",letter_regex.as_str(),"|",digit_regex.as_str(),")*"].concat();
+    let identifier_alphabet = [LETTERS, DIGITS].concat();
+
+
+    let regexes = &[
+        ("identifier", identifier_regex.as_str(), identifier_alphabet.as_str()),
+        ("keyword", "(var|print|if)", "varpintf"),
+        ("operator", "(\\+|-|/|\\*|=)", "+-/*="),
+        ("integer", "(0|1|2|3|4|5|6|7|8|9)*", "0123456789"),
+        ("ignored", "(;| |\t|\r|\n)", "; \t\r\n"),
     ];
+
+    let machines: Vec<Nfa> = regexes.iter().enumerate().map(|(i, &(class,regex,alphabet))| {
+        Nfa::from_regex(regex, alphabet, i+1)
+    }).collect();
+
+    let lexer_nfa = Nfa::union(machines.iter().collect_vec());
+    let lexer = Dfa::from_nfa(&lexer_nfa);
 
     while !istream.is_empty() {
         // get the longest prefix that is accepted by any DFA
-        let longest_accepted = machines.iter().map(|(class, machine)| {
-            (machine.get_longest_accepted(&mut istream), class)
-        }).max_by_key(|(name, _class)| {
-            // sort each longest prefix by length
-            name.len()
-        });
-
-        let Some((name, class)) = longest_accepted
-        else {return Result::Err(Error)};
-
-        let name_len = name.len();
-
+        let (name, mark) = lexer.get_longest_accepted(&mut istream);
+        if name.is_empty() {break}
+        let class = regexes[mark-1].0;
         // Skip ignored tokens
         if !(class.contains("ignored") || symbol_table.contains_key(&name)){
-            symbol_table.insert(name.clone(), class.clone());
-        }
-
-        // Pop front of the string
-        for _ in 0..name_len {
-            istream.pop_front();
+            symbol_table.insert(name, class.to_string());
         }
     }
-
-    // Convert symbol table keys from byte vectors to strings
-    let symbol_table = HashMap::<String, Rc<String>>::from_iter(symbol_table.iter().map(|(name_bytes,class)|{
-        let mut name = String::new();
-        name_bytes.iter().for_each(|&x| {name.push(x as char)});
-        (name, class.clone())   
-    }
-));
-
     Result::Ok(symbol_table)
 }

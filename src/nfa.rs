@@ -1,14 +1,16 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
-#[derive(Debug)]
+use itertools::Itertools;
+
+#[derive(Debug, Clone)]
 pub struct Nfa {
-    pub accepting: Vec<bool>,
+    pub marks: Vec<usize>,
     pub transition: Vec<Vec<Option<Vec<usize>>>>, // 2d Array where elements are sets of states,
     pub symbols_table: HashMap<char, usize>,
 }
 
 impl Nfa {
-    fn new(transition: Vec<Vec<Option<Vec<usize>>>>, accepting: Vec<bool>, alphabet: Vec<char>) -> Self {
+    fn new(transition: Vec<Vec<Option<Vec<usize>>>>, marks: Vec<usize>, alphabet: Vec<char>) -> Self {
         let symbols_table: HashMap<char, usize> = HashMap::from_iter(
             alphabet.iter().enumerate().map(|(i, &symbol)|{
                 (symbol, i)
@@ -16,10 +18,10 @@ impl Nfa {
         );
 
 
-        Nfa { accepting, transition, symbols_table }
+        Nfa { marks, transition, symbols_table }
     }
 
-    pub fn from_regex(regex: &str, alphabet: &str) -> Nfa {
+    pub fn from_regex(regex: &str, alphabet: &str, mark_num:usize) -> Nfa {
         let alphabet: Vec<char> = alphabet.chars().collect();
         let fragment = NfaFragment::from_regex(regex, &alphabet);
 
@@ -43,10 +45,10 @@ impl Nfa {
         }
 
         // Make the new final state the only accepting state
-        let mut accepting = vec![false; num_states];
-        *accepting.last_mut().unwrap() = true;
+        let mut marks = vec![0; num_states];
+        *marks.last_mut().unwrap() = mark_num;
 
-        Self::new(transition, accepting, alphabet)
+        Self::new(transition, marks, alphabet)
     }
 
     pub fn empty_closure(&self, states: Vec<usize>) -> Option<Vec<usize>> {
@@ -86,6 +88,58 @@ impl Nfa {
         });
 
         Some(result)
+    }
+
+    pub fn union (nfas:Vec<&Nfa>) -> Self {
+        let mut symbols = HashSet::<char>::new();
+        let mut marks = vec![0];
+        for nfa in nfas.iter() {
+            symbols.extend(nfa.symbols_table.keys());
+            marks.extend(nfa.marks.clone());
+        }
+        let symbols_num = symbols.len();
+        let symbols_table: HashMap<char, usize> = symbols.clone().into_iter().enumerate().map(|(x,y)| (y,x)).collect();
+
+        let mut transition = vec![vec![None; symbols_num + 1]];
+        let mut new_start_epsilon_transitions:Vec<usize> = vec![];
+
+
+
+        let mut nfa_offset = 1;
+        for nfa in nfas.iter() {
+            new_start_epsilon_transitions.push(nfa_offset);
+            let num_nfa_states = nfa.marks.len();
+            let key_indices: HashMap<usize, char> = nfa.symbols_table.clone().into_iter().map(|(x,y)| (y,x)).collect();
+            let num_nfa_symbols = key_indices.len();
+
+
+            for state_index in 0..num_nfa_states {
+                let translated_transitions = nfa.transition[state_index].iter().map(|out_states| {
+                    if let Some(states) = out_states {
+                        Some(states.into_iter().map(|x| nfa_offset + x).collect_vec())
+                    } else {
+                        None
+                    }
+                }).collect_vec();
+                
+                let mut new_transitions: Vec<Option<Vec<usize>>> = vec![None; symbols_num+1];
+                
+                for symbol_index in 0..num_nfa_symbols {
+                    let translated_symbol_index = symbols_table[&key_indices[&symbol_index]];
+                    new_transitions[translated_symbol_index] = translated_transitions[symbol_index].clone();
+                }
+
+                *new_transitions.last_mut().unwrap() = translated_transitions.last().unwrap().clone();
+
+                transition.push(new_transitions);
+            }
+
+            nfa_offset += num_nfa_states
+        }
+
+        *transition[0].last_mut().unwrap() = Some(new_start_epsilon_transitions);
+
+        Nfa { marks, transition, symbols_table }
     }
 }
 
@@ -351,5 +405,18 @@ const OPERATORS: &'static str = ")(|+*"; // in order of lower to higher preceden
         let out = (0, None);
 
         Self{transition, out}
+    }
+}
+
+impl ToString for Nfa {
+    fn to_string(&self) -> String {
+        let mut string = String::new();
+        let sorted_alphabet = self.symbols_table.keys().sorted_by_key(|x| self.symbols_table[x]).collect_vec();
+        string.push_str(format!("{:?}\n",sorted_alphabet).as_str());
+        for i in 0..self.marks.len() {
+            string.push_str(format!("{i} {:?} {:?}\n", self.transition[i], self.marks[i]).as_str())
+        }
+
+        string
     }
 }
