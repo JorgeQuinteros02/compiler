@@ -1,4 +1,4 @@
-# Building a Minimal Compiler Front-end
+# Simple Lexer generator
 
 This project consists of a small lexical generator.
 
